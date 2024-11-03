@@ -18,7 +18,6 @@ function App() {
         >
           Learn React
         </a>
-        <p>Adding more text</p>
       </header>
     </div>
   );
