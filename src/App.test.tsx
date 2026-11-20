@@ -38,3 +38,53 @@ test('shows reading stats', () => {
   expect(stats).toHaveTextContent('Finished');
   expect(stats).toHaveTextContent('5.0');
 });
+
+describe('signed-in mode', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  test('signing in loads the shelf from the API and saves new books there', async () => {
+    const calls: string[] = [];
+    global.fetch = jest.fn(async (url: any, init?: any) => {
+      const u = String(url);
+      calls.push(`${init?.method || 'GET'} ${u.replace(/^https?:\/\/[^/]+/, '')}`);
+      const json = (body: any, status = 200) => ({ ok: status < 400, status, json: async () => body } as Response);
+      if (u.includes('/v1/auth/login')) return json({ token: 't', userId: 'u1' });
+      if (u.endsWith('/v1/shelf') && (init?.method || 'GET') === 'GET') {
+        return json({ items: [{ id: 'a1', title: 'Server Book', author: 'Ann', status: 'reading', rating: 0, coverId: null, pages: null, year: null }] });
+      }
+      if (u.endsWith('/v1/shelf') && init?.method === 'POST') {
+        return json({ id: 'a2', title: 'Dune', author: 'Frank Herbert', status: 'want', rating: 0, coverId: null, pages: null, year: null }, 201);
+      }
+      if (u.includes('openlibrary')) return json({ docs: [] });
+      return json({}, 404);
+    }) as any;
+
+    render(<App />);
+    userEvent.type(screen.getByLabelText('Username'), 'ada');
+    userEvent.type(screen.getByLabelText('Password'), 'longenough1');
+    fireEvent.submit(screen.getByRole('form', { name: /sign in/i }));
+
+    expect(await screen.findByText('Server Book')).toBeInTheDocument();
+    expect(screen.queryByText('Piranesi')).not.toBeInTheDocument();
+    expect(screen.getByText(/signed in as/i)).toBeInTheDocument();
+
+    userEvent.type(screen.getByLabelText('Title'), 'Dune');
+    userEvent.type(screen.getByLabelText('Author'), 'Frank Herbert');
+    fireEvent.submit(screen.getByRole('form', { name: /add a book/i }));
+    expect(await screen.findByText('Dune')).toBeInTheDocument();
+    expect(calls).toContain('POST /v1/shelf');
+  });
+
+  test('shows the server error when sign-in fails', async () => {
+    global.fetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'Invalid username or password' }) } as Response)) as any;
+    render(<App />);
+    userEvent.type(screen.getByLabelText('Username'), 'ada');
+    userEvent.type(screen.getByLabelText('Password'), 'wrongwrong');
+    fireEvent.submit(screen.getByRole('form', { name: /sign in/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password');
+    expect(screen.getByText('Piranesi')).toBeInTheDocument(); // still in demo mode
+  });
+});
