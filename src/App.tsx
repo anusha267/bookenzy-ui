@@ -1,6 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Book, Status, STATUS_LABELS, computeStats, loadBooks, matchesQuery, saveBooks } from './books';
 import { SearchResult, coverUrl, searchBooks } from './openLibrary';
+import { ApiError, Session, createItem, deleteItem, fetchShelf, patchItem } from './api';
+import AuthPanel from './AuthPanel';
+
+const SESSION_KEY = 'bookenzy.session.v1';
+
+function loadSession(): Session | null {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as Session) : null;
+  } catch {
+    return null;
+  }
+}
 
 const STATUSES: Status[] = ['want', 'reading', 'finished'];
 
@@ -24,14 +37,94 @@ function Stars({ value, onChange }: { value: number; onChange: (n: number) => vo
 }
 
 function App() {
-  const [books, setBooks] = useState<Book[]>(loadBooks);
+  const [session, setSession] = useState<Session | null>(loadSession);
+  const [books, setBooks] = useState<Book[]>(() => (loadSession() ? [] : loadBooks()));
+  const [notice, setNotice] = useState('');
+  const [syncing, setSyncing] = useState(false);
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [filter, setFilter] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchError, setSearchError] = useState('');
 
-  useEffect(() => saveBooks(books), [books]);
+  // Demo mode: keep the shelf in this browser. Signed in: the server is the source of truth.
+  useEffect(() => {
+    if (!session) saveBooks(books);
+  }, [books, session]);
+
+  const signOut = (message = '') => {
+    window.localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    setBooks(loadBooks());
+    setNotice(message);
+  };
+
+  const handleApiError = (e: unknown) => {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+      signOut('Your session expired. Sign in again to keep syncing.');
+    } else {
+      setNotice(e instanceof Error ? e.message : 'Something went wrong');
+    }
+  };
+
+  const signedIn = (sess: Session) => {
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+    setSession(sess);
+    setNotice('');
+  };
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    setSyncing(true);
+    fetchShelf(session.token)
+      .then((items) => !cancelled && setBooks(items))
+      .catch((e) => !cancelled && handleApiError(e))
+      .finally(() => !cancelled && setSyncing(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  // One place for all shelf mutations, so demo and signed-in modes behave the same.
+  const addItem = async (item: Omit<Book, 'id'>) => {
+    if (!session) {
+      setBooks((prev) => [...prev, { ...item, id: `${Date.now()}` }]);
+      return;
+    }
+    try {
+      const created = await createItem(session.token, item);
+      setBooks((prev) => [...prev, created]);
+    } catch (e) {
+      handleApiError(e);
+    }
+  };
+
+  const updateItem = async (id: string, patch: Partial<Book>) => {
+    const before = books;
+    setBooks(before.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    if (!session) return;
+    try {
+      await patchItem(session.token, id, { status: patch.status, rating: patch.rating });
+    } catch (e) {
+      setBooks(before);
+      handleApiError(e);
+    }
+  };
+
+  const removeItem = async (id: string) => {
+    const before = books;
+    setBooks(before.filter((b) => b.id !== id));
+    if (!session) return;
+    try {
+      await deleteItem(session.token, id);
+    } catch (e) {
+      setBooks(before);
+      handleApiError(e);
+    }
+  };
+
 
   // Look books up on Open Library as the title is typed (debounced).
   useEffect(() => {
@@ -58,10 +151,7 @@ function App() {
   }, [title]);
 
   const addFromResult = (r: SearchResult) => {
-    setBooks([
-      ...books,
-      { id: `${Date.now()}`, title: r.title, author: r.author, status: 'want', rating: 0, coverId: r.coverId, pages: r.pages, year: r.year },
-    ]);
+    addItem({ title: r.title, author: r.author, status: 'want', rating: 0, coverId: r.coverId, pages: r.pages, year: r.year });
     setTitle('');
     setAuthor('');
     setResults([]);
@@ -81,16 +171,12 @@ function App() {
   const addBook = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !author.trim()) return;
-    setBooks([
-      ...books,
-      { id: `${Date.now()}`, title: title.trim(), author: author.trim(), status: 'want', rating: 0 },
-    ]);
+    addItem({ title: title.trim(), author: author.trim(), status: 'want', rating: 0 });
     setTitle('');
     setAuthor('');
   };
 
-  const update = (id: string, patch: Partial<Book>) =>
-    setBooks(books.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const update = updateItem;
 
   return (
     <div className="min-h-screen bg-stone-50 text-slate-800">
@@ -102,10 +188,29 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-6">
-        <p className="mb-6 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-          Demo mode: your shelf is saved in this browser only. Accounts and syncing with the Bookenzy API are
-          not connected yet.
-        </p>
+        {session ? (
+          <div className="mb-6 flex items-center justify-between rounded border border-green-300 bg-green-50 p-3 text-sm">
+            <span>
+              Signed in as <strong>{session.username}</strong>. Your shelf is synced to your account.
+              {syncing && ' Loading your shelf (the free server may be waking up)…'}
+            </span>
+            <button type="button" onClick={() => signOut()} className="text-indigo-700 underline">
+              Sign out
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="mb-6 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+              Demo mode: your shelf is saved in this browser only. Sign in below to sync it to your account.
+            </p>
+            <AuthPanel onSignedIn={signedIn} />
+          </>
+        )}
+        {notice && (
+          <p role="alert" className="mb-6 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+            {notice}
+          </p>
+        )}
 
         <form onSubmit={addBook} className="mb-8 flex flex-wrap gap-2" aria-label="Add a book">
           <input
@@ -223,7 +328,7 @@ function App() {
                         <button
                           type="button"
                           aria-label={`Remove ${b.title}`}
-                          onClick={() => setBooks(books.filter((x) => x.id !== b.id))}
+                          onClick={() => removeItem(b.id)}
                           className="text-sm text-slate-400 hover:text-red-600"
                         >
                           Remove
