@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Book, Status, STATUS_LABELS, loadBooks, saveBooks } from './books';
+import { Book, Status, STATUS_LABELS, computeStats, loadBooks, matchesQuery, saveBooks } from './books';
+import { SearchResult, coverUrl, searchBooks } from './openLibrary';
 
 const STATUSES: Status[] = ['want', 'reading', 'finished'];
 
@@ -26,8 +27,56 @@ function App() {
   const [books, setBooks] = useState<Book[]>(loadBooks);
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
+  const [filter, setFilter] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searchError, setSearchError] = useState('');
 
   useEffect(() => saveBooks(books), [books]);
+
+  // Look books up on Open Library as the title is typed (debounced).
+  useEffect(() => {
+    if (title.trim().length < 3) {
+      setResults([]);
+      setSearchError('');
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      searchBooks(title, controller.signal)
+        .then((r) => {
+          setResults(r);
+          setSearchError('');
+        })
+        .catch((e) => {
+          if (e.name !== 'AbortError') setSearchError('Book search is unavailable right now. You can still add books by hand.');
+        });
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [title]);
+
+  const addFromResult = (r: SearchResult) => {
+    setBooks([
+      ...books,
+      { id: `${Date.now()}`, title: r.title, author: r.author, status: 'want', rating: 0, coverId: r.coverId, pages: r.pages, year: r.year },
+    ]);
+    setTitle('');
+    setAuthor('');
+    setResults([]);
+  };
+
+  const exportShelf = () => {
+    const blob = new Blob([JSON.stringify(books, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'bookenzy-shelf.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const stats = computeStats(books);
 
   const addBook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,9 +127,66 @@ function App() {
           </button>
         </form>
 
+        {results.length > 0 && (
+          <ul aria-label="Search results" className="-mt-5 mb-8 divide-y rounded border border-slate-200 bg-white shadow-sm">
+            {results.map((r) => (
+              <li key={r.key}>
+                <button
+                  type="button"
+                  onClick={() => addFromResult(r)}
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-indigo-50"
+                >
+                  {r.coverId ? (
+                    <img src={coverUrl(r.coverId)} alt="" className="h-12 w-8 rounded object-cover" />
+                  ) : (
+                    <div className="h-12 w-8 rounded bg-slate-200" />
+                  )}
+                  <span>
+                    <span className="font-medium">{r.title}</span>
+                    <span className="block text-sm text-slate-500">
+                      {r.author}
+                      {r.year ? ` · ${r.year}` : ''}
+                      {r.pages ? ` · ${r.pages} pages` : ''}
+                    </span>
+                  </span>
+                  <span className="ml-auto text-sm text-indigo-700">Add</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {searchError && <p className="-mt-5 mb-6 text-sm text-slate-500">{searchError}</p>}
+
+        <section aria-label="Reading stats" className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[
+            ['Books', String(stats.total)],
+            ['Finished', String(stats.finished)],
+            ['Pages read', stats.pagesRead.toLocaleString()],
+            ['Average rating', stats.averageRating === null ? '-' : stats.averageRating.toFixed(1)],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg border border-slate-200 bg-white p-3 text-center shadow-sm">
+              <div className="text-2xl font-bold text-indigo-700">{value}</div>
+              <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
+            </div>
+          ))}
+        </section>
+
+        <div className="mb-6 flex gap-2">
+          <input
+            aria-label="Filter shelf"
+            placeholder="Filter your shelf by title or author"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="flex-1 rounded border border-slate-300 px-3 py-2"
+          />
+          <button type="button" onClick={exportShelf} className="rounded border border-indigo-700 px-4 py-2 text-indigo-700 hover:bg-indigo-50">
+            Export JSON
+          </button>
+        </div>
+
         <div className="grid gap-6 md:grid-cols-3">
           {STATUSES.map((s) => {
-            const list = books.filter((b) => b.status === s);
+            const list = books.filter((b) => b.status === s && matchesQuery(b, filter));
             return (
               <section key={s} aria-label={STATUS_LABELS[s]}>
                 <h2 className="mb-3 text-lg font-semibold">
@@ -90,8 +196,16 @@ function App() {
                   {list.length === 0 && <li className="text-sm text-slate-400">Nothing here yet.</li>}
                   {list.map((b) => (
                     <li key={b.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                      <div className="font-medium">{b.title}</div>
-                      <div className="mb-2 text-sm text-slate-500">{b.author}</div>
+                      <div className="mb-2 flex gap-3">
+                        {b.coverId && <img src={coverUrl(b.coverId)} alt="" loading="lazy" className="h-16 w-11 rounded object-cover" />}
+                        <div>
+                          <div className="font-medium">{b.title}</div>
+                          <div className="text-sm text-slate-500">
+                            {b.author}
+                            {b.pages ? ` · ${b.pages} pages` : ''}
+                          </div>
+                        </div>
+                      </div>
                       <div className="flex items-center justify-between gap-2">
                         <select
                           aria-label={`Status of ${b.title}`}

@@ -24,3 +24,17 @@ test('moves a book between shelves', () => {
   userEvent.selectOptions(screen.getByLabelText('Status of Piranesi'), 'finished');
   expect(screen.getByLabelText('Status of Piranesi')).toHaveValue('finished');
 });
+
+test('filters the shelf by title', () => {
+  render(<App />);
+  userEvent.type(screen.getByLabelText('Filter shelf'), 'hobbit');
+  expect(screen.getByText('The Hobbit')).toBeInTheDocument();
+  expect(screen.queryByText('Piranesi')).not.toBeInTheDocument();
+});
+
+test('shows reading stats', () => {
+  render(<App />);
+  const stats = screen.getByRole('region', { name: /reading stats/i });
+  expect(stats).toHaveTextContent('Finished');
+  expect(stats).toHaveTextContent('5.0');
+});
