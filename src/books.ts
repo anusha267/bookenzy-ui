@@ -9,9 +9,12 @@ export interface Book {
   coverId?: number; // Open Library cover id
   pages?: number;
   year?: number;
+  currentPage?: number; // pages read so far, for books being read
+  finishedAt?: string | null; // ISO date when the book was finished
 }
 
 export const STORAGE_KEY = 'bookenzy.books.v1';
+export const GOAL_KEY = 'bookenzy.goal.v1';
 
 export const STATUS_LABELS: Record<Status, string> = {
   want: 'Want to read',
@@ -20,8 +23,8 @@ export const STATUS_LABELS: Record<Status, string> = {
 };
 
 export const SAMPLE_BOOKS: Book[] = [
-  { id: 'sample-1', title: 'The Hobbit', author: 'J.R.R. Tolkien', status: 'finished', rating: 5, pages: 310 },
-  { id: 'sample-2', title: 'Project Hail Mary', author: 'Andy Weir', status: 'reading', rating: 0, pages: 476 },
+  { id: 'sample-1', title: 'The Hobbit', author: 'J.R.R. Tolkien', status: 'finished', rating: 5, pages: 310, finishedAt: '2026-01-15T12:00:00.000Z' },
+  { id: 'sample-2', title: 'Project Hail Mary', author: 'Andy Weir', status: 'reading', rating: 0, pages: 476, currentPage: 120 },
   { id: 'sample-3', title: 'Piranesi', author: 'Susanna Clarke', status: 'want', rating: 0, pages: 272 },
 ];
 
@@ -44,6 +47,25 @@ export function saveBooks(books: Book[]): void {
   }
 }
 
+export function loadGoal(): number | null {
+  try {
+    const raw = window.localStorage.getItem(GOAL_KEY);
+    const n = raw === null ? NaN : parseInt(raw, 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveGoal(goal: number | null): void {
+  try {
+    if (goal === null) window.localStorage.removeItem(GOAL_KEY);
+    else window.localStorage.setItem(GOAL_KEY, String(goal));
+  } catch {
+    // storage unavailable: the goal still works for this session
+  }
+}
+
 export interface Stats {
   total: number;
   finished: number;
@@ -60,6 +82,14 @@ export function computeStats(books: Book[]): Stats {
     pagesRead: finished.reduce((sum, b) => sum + (b.pages || 0), 0),
     averageRating: rated.length ? rated.reduce((sum, b) => sum + b.rating, 0) / rated.length : null,
   };
+}
+
+// Books finished in the given year. Books finished before finishedAt was
+// tracked have no date, so they count toward the goal as well.
+export function computeGoalProgress(books: Book[], year: number): number {
+  return books.filter(
+    (b) => b.status === 'finished' && (!b.finishedAt || new Date(b.finishedAt).getFullYear() === year)
+  ).length;
 }
 
 export function matchesQuery(book: Book, query: string): boolean {

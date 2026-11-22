@@ -57,6 +57,8 @@ const fromApi = (i: any): Book => ({
   coverId: i.coverId ?? undefined,
   pages: i.pages ?? undefined,
   year: i.year ?? undefined,
+  currentPage: i.currentPage ?? undefined,
+  finishedAt: i.finishedAt ?? null,
 });
 
 export async function fetchShelf(token: string): Promise<Book[]> {
@@ -68,7 +70,7 @@ export async function createItem(token: string, b: Omit<Book, 'id'>): Promise<Bo
   return fromApi(await request('/v1/shelf', { method: 'POST', token, body: JSON.stringify(b) }));
 }
 
-export async function patchItem(token: string, id: string, patch: { status?: Status; rating?: number }): Promise<Book> {
+export async function patchItem(token: string, id: string, patch: { status?: Status; rating?: number; currentPage?: number }): Promise<Book> {
   return fromApi(await request(`/v1/shelf/${id}`, { method: 'PATCH', token, body: JSON.stringify(patch) }));
 }
 

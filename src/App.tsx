@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Book, Status, STATUS_LABELS, computeStats, loadBooks, matchesQuery, saveBooks } from './books';
+import { Book, Status, STATUS_LABELS, computeGoalProgress, computeStats, loadBooks, loadGoal, matchesQuery, saveBooks, saveGoal } from './books';
 import { SearchResult, coverUrl, searchBooks } from './openLibrary';
 import { ApiError, Session, createItem, deleteItem, fetchShelf, patchItem } from './api';
 import AuthPanel from './AuthPanel';
@@ -36,6 +36,57 @@ function Stars({ value, onChange }: { value: number; onChange: (n: number) => vo
   );
 }
 
+function ProgressBar({ value, max, label }: { value: number; max: number; label: string }) {
+  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      className="h-2 w-full rounded bg-slate-200"
+    >
+      <div className="h-2 rounded bg-indigo-600" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function PageProgress({ book, onUpdate }: { book: Book; onUpdate: (page: number) => void }) {
+  const [value, setValue] = useState(String(book.currentPage ?? 0));
+  if (!book.pages) return null;
+  const current = Math.min(book.currentPage ?? 0, book.pages);
+  return (
+    <div className="mt-2">
+      <ProgressBar value={current} max={book.pages} label={`Page progress for ${book.title}`} />
+      <form
+        aria-label={`Update current page for ${book.title}`}
+        className="mt-1 flex flex-wrap items-center gap-2 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const n = parseInt(value, 10);
+          if (Number.isInteger(n) && n >= 0 && n <= 100000) onUpdate(n);
+        }}
+      >
+        <label className="text-slate-500">On page</label>
+        <input
+          aria-label={`Current page of ${book.title}`}
+          type="number"
+          min={0}
+          max={100000}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="w-20 rounded border border-slate-300 px-1 py-0.5"
+        />
+        <span className="text-slate-500">of {book.pages}</span>
+        <button type="submit" className="text-indigo-700 underline">
+          Update
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function App() {
   const [session, setSession] = useState<Session | null>(loadSession);
   const [books, setBooks] = useState<Book[]>(() => (loadSession() ? [] : loadBooks()));
@@ -46,6 +97,8 @@ function App() {
   const [filter, setFilter] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchError, setSearchError] = useState('');
+  const [goal, setGoal] = useState<number | null>(loadGoal);
+  const [goalInput, setGoalInput] = useState('');
 
   // Demo mode: keep the shelf in this browser. Signed in: the server is the source of truth.
   useEffect(() => {
@@ -103,10 +156,24 @@ function App() {
 
   const updateItem = async (id: string, patch: Partial<Book>) => {
     const before = books;
-    setBooks(before.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    // Mirror the server: finishedAt is set when a book first becomes finished and cleared if it moves back.
+    setBooks(
+      before.map((b) => {
+        if (b.id !== id) return b;
+        const next = { ...b, ...patch };
+        if (patch.status === 'finished' && b.status !== 'finished') next.finishedAt = new Date().toISOString();
+        if (patch.status && patch.status !== 'finished') next.finishedAt = null;
+        return next;
+      })
+    );
     if (!session) return;
     try {
-      await patchItem(session.token, id, { status: patch.status, rating: patch.rating });
+      const updated = await patchItem(session.token, id, {
+        status: patch.status,
+        rating: patch.rating,
+        currentPage: patch.currentPage,
+      });
+      setBooks((prev) => prev.map((b) => (b.id === id ? updated : b)));
     } catch (e) {
       setBooks(before);
       handleApiError(e);
@@ -125,6 +192,20 @@ function App() {
     }
   };
 
+  const setGoalFromInput = (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = parseInt(goalInput, 10);
+    if (Number.isInteger(n) && n > 0) {
+      setGoal(n);
+      saveGoal(n);
+      setGoalInput('');
+    }
+  };
+
+  const clearGoal = () => {
+    setGoal(null);
+    saveGoal(null);
+  };
 
   // Look books up on Open Library as the title is typed (debounced).
   useEffect(() => {
@@ -167,6 +248,8 @@ function App() {
   };
 
   const stats = computeStats(books);
+  const goalYear = new Date().getFullYear();
+  const finishedThisYear = computeGoalProgress(books, goalYear);
 
   const addBook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -211,6 +294,44 @@ function App() {
             {notice}
           </p>
         )}
+
+        <section aria-label="Reading goal" className="mb-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">{goalYear} reading goal</h2>
+            {goal !== null && (
+              <button type="button" onClick={clearGoal} className="text-sm text-slate-400 hover:text-red-600">
+                Clear goal
+              </button>
+            )}
+          </div>
+          {goal === null ? (
+            <form onSubmit={setGoalFromInput} aria-label="Set reading goal" className="flex flex-wrap items-center gap-2">
+              <label className="text-sm text-slate-600" htmlFor="goal-input">
+                How many books do you want to read this year?
+              </label>
+              <input
+                id="goal-input"
+                aria-label="Goal in books"
+                type="number"
+                min={1}
+                value={goalInput}
+                onChange={(e) => setGoalInput(e.target.value)}
+                className="w-24 rounded border border-slate-300 px-2 py-1"
+              />
+              <button type="submit" className="rounded bg-indigo-700 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-800">
+                Set goal
+              </button>
+            </form>
+          ) : (
+            <>
+              <ProgressBar value={finishedThisYear} max={goal} label="Reading goal progress" />
+              <p className="mt-2 text-sm text-slate-600">
+                {finishedThisYear} of {goal} books finished this year
+                {finishedThisYear >= goal ? '. Goal reached!' : ''}
+              </p>
+            </>
+          )}
+        </section>
 
         <form onSubmit={addBook} className="mb-8 flex flex-wrap gap-2" aria-label="Add a book">
           <input
@@ -334,6 +455,7 @@ function App() {
                           Remove
                         </button>
                       </div>
+                      {b.status === 'reading' && <PageProgress book={b} onUpdate={(n) => update(b.id, { currentPage: n })} />}
                     </li>
                   ))}
                 </ul>
