@@ -39,6 +39,22 @@ test('shows reading stats', () => {
   expect(stats).toHaveTextContent('5.0');
 });
 
+test('sets a reading goal and shows progress', () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText('Goal in books'), { target: { value: '5' } });
+  fireEvent.submit(screen.getByRole('form', { name: /set reading goal/i }));
+  const region = screen.getByRole('region', { name: /reading goal/i });
+  expect(region).toHaveTextContent('1 of 5 books finished this year');
+});
+
+test('updates the current page of a book being read', () => {
+  render(<App />);
+  fireEvent.change(screen.getByLabelText('Current page of Project Hail Mary'), { target: { value: '200' } });
+  fireEvent.submit(screen.getByRole('form', { name: /update current page for project hail mary/i }));
+  expect(screen.getByLabelText('Current page of Project Hail Mary')).toHaveValue(200);
+  expect(screen.getByRole('progressbar', { name: /page progress for project hail mary/i })).toHaveAttribute('aria-valuenow', '200');
+});
+
 describe('signed-in mode', () => {
   const realFetch = global.fetch;
   afterEach(() => {
