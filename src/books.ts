@@ -84,12 +84,18 @@ export function computeStats(books: Book[]): Stats {
   };
 }
 
-// Books finished in the given year. Books finished before finishedAt was
-// tracked have no date, so they count toward the goal as well.
+// Books finished in the given year. Only a finishedAt inside the year counts:
+// an undated finish must not silently claim this year.
 export function computeGoalProgress(books: Book[], year: number): number {
   return books.filter(
-    (b) => b.status === 'finished' && (!b.finishedAt || new Date(b.finishedAt).getFullYear() === year)
+    (b) => b.status === 'finished' && !!b.finishedAt && new Date(b.finishedAt).getFullYear() === year
   ).length;
+}
+
+// Finished books with no completion date (finished before finishedAt was
+// tracked). Shown separately so the yearly count stays honest.
+export function countUndatedFinished(books: Book[]): number {
+  return books.filter((b) => b.status === 'finished' && !b.finishedAt).length;
 }
 
 export function matchesQuery(book: Book, query: string): boolean {
