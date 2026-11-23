@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Book, Status, STATUS_LABELS, computeGoalProgress, computeStats, loadBooks, loadGoal, matchesQuery, saveBooks, saveGoal } from './books';
+import { Book, Status, STATUS_LABELS, computeGoalProgress, computeStats, countUndatedFinished, loadBooks, loadGoal, matchesQuery, saveBooks, saveGoal } from './books';
 import { SearchResult, coverUrl, searchBooks } from './openLibrary';
 import { ApiError, Session, createItem, deleteItem, fetchShelf, patchItem } from './api';
 import AuthPanel from './AuthPanel';
@@ -250,6 +250,7 @@ function App() {
   const stats = computeStats(books);
   const goalYear = new Date().getFullYear();
   const finishedThisYear = computeGoalProgress(books, goalYear);
+  const undatedFinished = countUndatedFinished(books);
 
   const addBook = (e: React.FormEvent) => {
     e.preventDefault();
@@ -329,6 +330,11 @@ function App() {
                 {finishedThisYear} of {goal} books finished this year
                 {finishedThisYear >= goal ? '. Goal reached!' : ''}
               </p>
+              {undatedFinished > 0 && (
+                <p className="mt-1 text-xs text-slate-400">
+                  {undatedFinished} more finished, completion {undatedFinished === 1 ? 'date' : 'dates'} unknown, not counted for {goalYear}.
+                </p>
+              )}
             </>
           )}
         </section>

@@ -55,6 +55,22 @@ test('updates the current page of a book being read', () => {
   expect(screen.getByRole('progressbar', { name: /page progress for project hail mary/i })).toHaveAttribute('aria-valuenow', '200');
 });
 
+test('reports undated finished books separately from the yearly goal', () => {
+  const year = new Date().getFullYear();
+  window.localStorage.setItem('bookenzy.goal.v1', '5');
+  window.localStorage.setItem(
+    'bookenzy.books.v1',
+    JSON.stringify([
+      { id: 'b1', title: 'Old Finish', author: 'Ann', status: 'finished', rating: 4 },
+      { id: 'b2', title: 'New Finish', author: 'Bob', status: 'finished', rating: 5, finishedAt: `${year}-05-01T10:00:00.000Z` },
+    ])
+  );
+  render(<App />);
+  const region = screen.getByRole('region', { name: /reading goal/i });
+  expect(region).toHaveTextContent('1 of 5 books finished this year');
+  expect(region).toHaveTextContent(`1 more finished, completion date unknown, not counted for ${year}`);
+});
+
 describe('signed-in mode', () => {
   const realFetch = global.fetch;
   afterEach(() => {
