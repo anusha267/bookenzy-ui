@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
@@ -72,14 +73,14 @@ test('reports undated finished books separately from the yearly goal', () => {
 });
 
 describe('signed-in mode', () => {
-  const realFetch = global.fetch;
+  const realFetch = globalThis.fetch;
   afterEach(() => {
-    global.fetch = realFetch;
+    globalThis.fetch = realFetch;
   });
 
   test('signing in loads the shelf from the API and saves new books there', async () => {
     const calls: string[] = [];
-    global.fetch = jest.fn(async (url: any, init?: any) => {
+    globalThis.fetch = vi.fn(async (url: any, init?: any) => {
       const u = String(url);
       calls.push(`${init?.method || 'GET'} ${u.replace(/^https?:\/\/[^/]+/, '')}`);
       const json = (body: any, status = 200) => ({ ok: status < 400, status, json: async () => body } as Response);
@@ -111,7 +112,7 @@ describe('signed-in mode', () => {
   });
 
   test('shows the server error when sign-in fails', async () => {
-    global.fetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'Invalid username or password' }) } as Response)) as any;
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'Invalid username or password' }) } as Response)) as any;
     render(<App />);
     userEvent.type(screen.getByLabelText('Username'), 'ada');
     userEvent.type(screen.getByLabelText('Password'), 'wrongwrong');

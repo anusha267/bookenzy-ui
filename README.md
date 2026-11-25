@@ -30,12 +30,12 @@ The API runs on a free tier that sleeps when idle, so the first sign-in or load 
 git clone https://github.com/anusha267/bookenzy-ui.git
 cd bookenzy-ui
 npm install
-npm start      # http://localhost:3000
+npm start      # http://localhost:3000/bookenzy-ui/
 npm test       # unit tests (React Testing Library)
 npm run build  # production build in build/
 ```
 
-Point the UI at another API with `REACT_APP_API_URL` (default: the hosted backend above).
+Point the UI at another API with `VITE_API_URL` (default: the hosted backend above).
 
 ## Deployment
 
