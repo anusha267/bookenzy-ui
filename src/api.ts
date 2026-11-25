@@ -1,7 +1,7 @@
 import { Book, Status } from './books';
 
 // The free Render tier sleeps when idle, so the first request can take up to a minute.
-export const API_URL = (process.env.REACT_APP_API_URL || 'https://bookenzy-backend.onrender.com').replace(/\/$/, '');
+export const API_URL = (import.meta.env.VITE_API_URL || 'https://bookenzy-backend.onrender.com').replace(/\/$/, '');
 
 export class ApiError extends Error {
   status: number;
