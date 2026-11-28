@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -119,5 +119,74 @@ describe('signed-in mode', () => {
     fireEvent.submit(screen.getByRole('form', { name: /sign in/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password');
     expect(screen.getByText('Piranesi')).toBeInTheDocument(); // still in demo mode
+  });
+});
+
+describe('signed-in mutations and failures', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+  const json = (body: any, status = 200) => ({ ok: status < 400, status, json: async () => body } as Response);
+  const item = { id: 'a1', title: 'Server Book', author: 'Ann', status: 'want', rating: 0, coverId: null, pages: null, year: null };
+
+  const signIn = async (handler: (u: string, init?: any) => Response) => {
+    globalThis.fetch = vi.fn(async (url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes('/v1/auth/login')) return json({ token: 't' });
+      if (u.endsWith('/v1/shelf') && (init?.method || 'GET') === 'GET') return json({ items: [item] });
+      return handler(u, init);
+    }) as any;
+    render(<App />);
+    userEvent.type(screen.getByLabelText('Username'), 'ada');
+    userEvent.type(screen.getByLabelText('Password'), 'longenough1');
+    fireEvent.submit(screen.getByRole('form', { name: /sign in/i }));
+    await screen.findByText('Server Book');
+  };
+
+  test('status change is saved with PATCH and the server copy is shown', async () => {
+    const seen: any[] = [];
+    await signIn((u, init) => {
+      seen.push([init?.method, u.replace(/^https?:\/\/[^/]+/, ''), init?.body]);
+      return json({ ...item, status: 'finished', finishedAt: '2026-02-02T00:00:00.000Z' });
+    });
+    userEvent.selectOptions(screen.getByLabelText('Status of Server Book'), 'finished');
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0][0]).toBe('PATCH');
+    expect(seen[0][1]).toBe('/v1/shelf/a1');
+    expect(JSON.parse(seen[0][2])).toEqual({ status: 'finished' });
+  });
+
+  test('a failed save rolls the change back and shows the error', async () => {
+    await signIn(() => json({ error: 'Boom' }, 500));
+    userEvent.selectOptions(screen.getByLabelText('Status of Server Book'), 'finished');
+    expect(await screen.findByText('Boom')).toBeInTheDocument();
+    expect(screen.getByLabelText('Status of Server Book')).toHaveValue('want');
+  });
+
+  test('removing a book calls DELETE', async () => {
+    const seen: string[] = [];
+    await signIn((u, init) => {
+      seen.push(`${init?.method} ${u.replace(/^https?:\/\/[^/]+/, '')}`);
+      return { ok: true, status: 204, json: async () => { throw new Error('none'); } } as unknown as Response;
+    });
+    fireEvent.click(screen.getByLabelText('Remove Server Book'));
+    await waitFor(() => expect(seen).toContain('DELETE /v1/shelf/a1'));
+    expect(screen.queryByText('Server Book')).not.toBeInTheDocument();
+  });
+
+  test('an expired session (401) signs the user out and returns to demo mode', async () => {
+    await signIn(() => json({ error: 'x' }, 403));
+    userEvent.selectOptions(screen.getByLabelText('Status of Server Book'), 'finished');
+    expect(await screen.findByText(/session expired/i)).toBeInTheDocument();
+    expect(screen.getByText('Piranesi')).toBeInTheDocument();
+    expect(screen.queryByText(/signed in as/i)).not.toBeInTheDocument();
+  });
+
+  test('signing out returns to the local demo shelf', async () => {
+    await signIn(() => json({}, 404));
+    fireEvent.click(screen.getByRole('button', { name: /sign out/i }));
+    expect(screen.getByText('Piranesi')).toBeInTheDocument();
+    expect(screen.queryByText('Server Book')).not.toBeInTheDocument();
   });
 });
