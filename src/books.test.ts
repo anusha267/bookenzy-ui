@@ -40,3 +40,33 @@ test('countUndatedFinished counts finished books with no completion date', () =>
   expect(countUndatedFinished(books)).toBe(1);
   expect(countUndatedFinished([])).toBe(0);
 });
+
+import { loadBooks, loadGoal, saveBooks, saveGoal, SAMPLE_BOOKS, STORAGE_KEY } from './books';
+
+describe('local storage helpers', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  test('loadBooks returns samples when nothing is stored, and keeps an empty shelf empty', () => {
+    expect(loadBooks()).toEqual(SAMPLE_BOOKS);
+    saveBooks([]);
+    expect(loadBooks()).toEqual([]);
+  });
+  test('loadBooks falls back to samples for corrupt or non-array data', () => {
+    window.localStorage.setItem(STORAGE_KEY, '{not json');
+    expect(loadBooks()).toEqual(SAMPLE_BOOKS);
+    window.localStorage.setItem(STORAGE_KEY, '{"a":1}');
+    expect(loadBooks()).toEqual(SAMPLE_BOOKS);
+  });
+  test('goal round-trips, rejects invalid values and can be cleared', () => {
+    expect(loadGoal()).toBeNull();
+    saveGoal(12);
+    expect(loadGoal()).toBe(12);
+    window.localStorage.setItem('bookenzy.goal.v1', '-3');
+    expect(loadGoal()).toBeNull();
+    window.localStorage.setItem('bookenzy.goal.v1', 'abc');
+    expect(loadGoal()).toBeNull();
+    saveGoal(5);
+    saveGoal(null);
+    expect(loadGoal()).toBeNull();
+  });
+});
